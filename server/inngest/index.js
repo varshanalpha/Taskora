@@ -1,14 +1,27 @@
 import { Inngest } from "inngest";
+import { PrismaClient } from "../src/generated/prisma/client.js";
+import { PrismaPg } from "@prisma/adapter-pg";
+import pg from "pg";
 
-// Create a client to send and receive events
-export const inngest = new Inngest({ id: "Taskora" });
-// Inngest Function to save user data to a database
+const { Pool } = pg;
+
+const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+});
+
+const adapter = new PrismaPg(pool);
+
+const prisma = new PrismaClient({ adapter });
+
+export const inngest = new Inngest({
+    id: "Taskora",
+});
+
+// Sync user creation from Clerk
 const syncUserCreation = inngest.createFunction(
     {
-        id: 'sync-user-from-clerk',
-    },
-    {
-        event: 'clerk/user.created',
+        id: "sync-user-from-clerk",
+        triggers: [{ event: "clerk/user.created" }],
     },
     async ({ event }) => {
         const { data } = event;
@@ -16,50 +29,56 @@ const syncUserCreation = inngest.createFunction(
         await prisma.user.create({
             data: {
                 id: data.id,
-                email: data?.email_addresses[0]?.email_address,
-                name: data?.first_name + " " + data?.last_name,
-                image: data?.image_url,
+                email: data.email_addresses[0]?.email_address,
+                name: `${data.first_name ?? ""} ${data.last_name ?? ""}`.trim(),
+                image: data.image_url,
             },
         });
     }
 );
-// Inngest Function to delete user from database
+
+// Sync user deletion from Clerk
 const syncUserDeletion = inngest.createFunction(
-    { id: 'delete-user-with-clerk' },
-    { event: 'clerk/user.deleted' },
+    {
+        id: "delete-user-with-clerk",
+        triggers: [{ event: "clerk/user.deleted" }],
+    },
     async ({ event }) => {
         const { data } = event;
 
-        await prisma.user.delete({
+        await prisma.user.deleteMany({
             where: {
                 id: data.id,
             },
         });
     }
 );
-// Inngest Function to update user data in database
+
+// Sync user updates from Clerk
 const syncUserUpdation = inngest.createFunction(
-    { id: 'update-user-from-clerk' },
-    { event: 'clerk/user.updated' },
+    {
+        id: "update-user-from-clerk",
+        triggers: [{ event: "clerk/user.updated" }],
+    },
     async ({ event }) => {
         const { data } = event;
 
-        await prisma.user.update({
+        await prisma.user.updateMany({
             where: {
-                id: data.id
+                id: data.id,
             },
             data: {
-                email: data?.email_addresses[0]?.email_address,
-                name: data?.first_name + " " + data?.last_name,
-                image: data?.image_url,
-            }
+                email: data.email_addresses[0]?.email_address,
+                name: `${data.first_name ?? ""} ${data.last_name ?? ""}`.trim(),
+                image: data.image_url,
+            },
         });
     }
 );
 
-// Create an empty array where we'll export future Inngest functions
+// Export Inngest functions
 export const functions = [
-    syncUserUpdation,
     syncUserCreation,
-    syncUserDeletion
+    syncUserDeletion,
+    syncUserUpdation,
 ];
